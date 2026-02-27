@@ -147,12 +147,12 @@ int mapidle(pid_t pid, unsigned long long mapstart, unsigned long long mapend)
 
 		// read idle bit
 		idlemapp = (pfn / 64) * BITMAP_CHUNK_SIZE;
-		if (idlemapp > g_idlebufsize) {
+		if (idlemapp + sizeof(unsigned long long) > g_idlebufsize) {
 			printf("ERROR: bad PFN read from page map.\n");
 			err = 1;
 			goto out;
 		}
-		idlebits = g_idlebuf[idlemapp];
+		idlebits = g_idlebuf[idlemapp / sizeof(unsigned long long)];
 		if (g_debug > 1) {
 			printf("R: p %llx pfn %llx idlebits %llx\n",
 			    p[i], pfn, idlebits);
@@ -248,7 +248,7 @@ int loadidlemap()
 	p = g_idlebuf;
 	// unfortunately, larger reads do not seem supported
 	while ((len = read(idlefd, p, IDLEMAP_CHUNK_SIZE)) > 0) {
-		p += IDLEMAP_CHUNK_SIZE;
+		p += len / sizeof(unsigned long long);;
 		g_idlebufsize += len;
 	}
 	close(idlefd);
@@ -259,64 +259,62 @@ int loadidlemap()
 int main(int argc, char *argv[])
 {
 	pid_t pid;
-	double duration, mbytes;
+	double duration = 0, mbytes;
 	static struct timeval ts1, ts2, ts3, ts4;
 	unsigned long long set_us, read_us, dur_us, slp_us, est_us;
 
-	// options
-	if (argc < 3) {
+
+	if (argc < 2) {
 		printf("USAGE: wss PID duration(s)\n");
 		exit(0);
-	}	
-	pid = atoi(argv[1]);
-	duration = atof(argv[2]);
-	if (duration < 0.01) {
-		printf("Interval too short. Exiting.\n");
-		return 1;
 	}
-	printf("Watching PID %d page references during %.2f seconds...\n",
-	    pid, duration);
+	pid = atoi(argv[1]);
 
-	// set idle flags
-	gettimeofday(&ts1, NULL);
-	setidlemap();
+	if (argc > 2) {
+	    duration = atof(argv[2]);
+	    if (duration < 0.01) {
+        	printf("Interval too short. Exiting.\n");
+        	return 1;
+        }
+	}
 
-	// sleep
-	gettimeofday(&ts2, NULL);
-	usleep((int)(duration * 1000000));
-	gettimeofday(&ts3, NULL);
+	if ( duration > 0 ) {
+		// set idle flags
+    	gettimeofday(&ts1, NULL);
+		printf("Watching PID %d page references during %.2f seconds...\n", pid, duration);
+		setidlemap();
+		gettimeofday(&ts2, NULL);
+
+		// sleep
+        usleep((int)(duration * 1000000));
+
+        set_us = 1000000 * (ts2.tv_sec - ts1.tv_sec) + (ts2.tv_usec - ts1.tv_usec);
+	} else {
+	    set_us = 0;
+	}
+
 
 	// read idle flags
+	gettimeofday(&ts3, NULL);
 	loadidlemap();
 	walkmaps(pid);
 	gettimeofday(&ts4, NULL);
 
 	// calculate times
-	set_us = 1000000 * (ts2.tv_sec - ts1.tv_sec) +
-	    (ts2.tv_usec - ts1.tv_usec);
-	slp_us = 1000000 * (ts3.tv_sec - ts2.tv_sec) +
-	    (ts3.tv_usec - ts2.tv_usec);
-	read_us = 1000000 * (ts4.tv_sec - ts3.tv_sec) +
-	    (ts4.tv_usec - ts3.tv_usec);
-	dur_us = 1000000 * (ts4.tv_sec - ts1.tv_sec) +
-	    (ts4.tv_usec - ts1.tv_usec);
-	est_us = dur_us - (set_us / 2) - (read_us / 2);
+	read_us = 1000000 * (ts4.tv_sec - ts3.tv_sec) + (ts4.tv_usec - ts3.tv_usec);
+	dur_us = 1000000 * (ts4.tv_sec - ts1.tv_sec) + (ts4.tv_usec - ts1.tv_usec);
+
 	if (g_debug) {
 		printf("set time   : %.3f s\n", (double)set_us / 1000000);
-		printf("sleep time : %.3f s\n", (double)slp_us / 1000000);
 		printf("read time  : %.3f s\n", (double)read_us / 1000000);
-		printf("dur time   : %.3f s\n", (double)dur_us / 1000000);
-		printf("referenced : %d pages, %d Mbytes\n", g_activepages, g_activepages * getpagesize()/ (1024 * 1024));
-		printf("walked     : %d pages, %d Mbytes\n", g_walkedpages, g_walkedpages * getpagesize()/ (1024 * 1024));
+		printf("referenced : %d pages, %.2f MB\n", g_activepages, ((double)g_activepages * getpagesize()) / (1024 * 1024));
+		printf("walked     : %d pages, %.2f MB\n", g_walkedpages, ((double)g_walkedpages * getpagesize()) / (1024 * 1024));
 	}
 
 	// assume getpagesize() sized pages:
-	if (g_debug = 0){
-		mbytes = (g_activepages * getpagesize()) / (1024 * 1024);
-    	printf("%-7s %10s\n", "Est(s)", "Ref(MB)");
-    	printf("%-7.3f %10.2f", (double)est_us / 1000000, mbytes);
+	if (g_debug == 0){
+    	printf("%d", g_activepages * getpagesize());
 	}
-
 
 	return 0;
 }

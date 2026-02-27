@@ -73,7 +73,7 @@
 #endif
 
 // globals
-int g_debug = 0;		// 1 == some, 2 == verbose
+int g_debug = 1;		// 1 == some, 2 == verbose
 int g_activepages = 0;
 int g_walkedpages = 0;
 char *g_idlepath = "/sys/kernel/mm/page_idle/bitmap";
@@ -138,6 +138,9 @@ int mapidle(pid_t pid, unsigned long long mapstart, unsigned long long mapend)
 
 	for (i = 0; i < pagebufsize / sizeof (unsigned long long); i++) {
 		// convert virtual address p to physical PFN
+		// fix： 检查每个虚拟页的 present 和 swap 位， present = 0 表示未映射到物理内存， swap = 1 表示映射到交换
+		if (!(p[i] & (1ULL << 63)) || (p[i] & (1ULL << 62)))
+			continue;
 		pfn = p[i] & PFN_MASK;
 		if (pfn == 0)
 			continue;
@@ -187,7 +190,7 @@ int walkmaps(pid_t pid)
 
 	while (fgets(line, sizeof (line), mapsfile) != NULL) {
 		sscanf(line, "%llx-%llx", &mapstart, &mapend);
-		if (g_debug)
+		if (g_debug > 1)
 			printf("MAP %llx-%llx\n", mapstart, mapend);
 		if (mapstart > PAGE_OFFSET)
 			continue;	// page idle tracking is user mem only
@@ -299,21 +302,21 @@ int main(int argc, char *argv[])
 	    (ts4.tv_usec - ts1.tv_usec);
 	est_us = dur_us - (set_us / 2) - (read_us / 2);
 	if (g_debug) {
-		printf("set time  : %.3f s\n", (double)set_us / 1000000);
-		printf("sleep time: %.3f s\n", (double)slp_us / 1000000);
-		printf("read time : %.3f s\n", (double)read_us / 1000000);
-		printf("dur time  : %.3f s\n", (double)dur_us / 1000000);
-		// assume getpagesize() sized pages:
-		printf("referenced: %d pages, %d Kbytes\n", g_activepages,
-		    g_activepages * getpagesize());
-		printf("walked    : %d pages, %d Kbytes\n", g_walkedpages,
-		    g_walkedpages * getpagesize());
+		printf("set time   : %.3f s\n", (double)set_us / 1000000);
+		printf("sleep time : %.3f s\n", (double)slp_us / 1000000);
+		printf("read time  : %.3f s\n", (double)read_us / 1000000);
+		printf("dur time   : %.3f s\n", (double)dur_us / 1000000);
+		printf("referenced : %d pages, %d Mbytes\n", g_activepages, g_activepages * getpagesize()/ (1024 * 1024));
+		printf("walked     : %d pages, %d Mbytes\n", g_walkedpages, g_walkedpages * getpagesize()/ (1024 * 1024));
 	}
 
 	// assume getpagesize() sized pages:
-	mbytes = (g_activepages * getpagesize()) / (1024 * 1024);
-	printf("%-7s %10s\n", "Est(s)", "Ref(MB)");
-	printf("%-7.3f %10.2f", (double)est_us / 1000000, mbytes);
+	if (g_debug = 0){
+		mbytes = (g_activepages * getpagesize()) / (1024 * 1024);
+    	printf("%-7s %10s\n", "Est(s)", "Ref(MB)");
+    	printf("%-7.3f %10.2f", (double)est_us / 1000000, mbytes);
+	}
+
 
 	return 0;
 }
